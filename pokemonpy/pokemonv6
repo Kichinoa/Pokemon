@@ -1,0 +1,320 @@
+import threading
+import requests
+import tkinter as tk
+from tkinter import Toplevel, ttk, messagebox
+from PIL import Image, ImageTk
+from io import BytesIO
+current_pokemon_id = 1 
+
+def load_local_image(image_path, size=(80, 30)):
+    try:
+        img = Image.open(image_path)  
+        img = img.resize(size, Image.LANCZOS)  
+        return ImageTk.PhotoImage(img) 
+    except FileNotFoundError:
+        print(f"Local image not found at {image_path}.")
+        return None
+    except Exception as e:
+        print(f"Error loading local image: {e}")
+        return None
+
+def load_image_from_url(url, size=(80, 80)):
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  
+        img_data = response.content
+        img = Image.open(BytesIO(img_data)) 
+        img = img.resize(size, Image.LANCZOS) 
+        return ImageTk.PhotoImage(img)  
+    except requests.exceptions.RequestException as e:
+        print(f"Error loading image from URL: {e}")
+        return None
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return None
+
+def create_main_window():
+    root = tk.Tk()
+    root.title("Pokedex")
+    root.geometry("810x600")
+
+    background_image_path = "D:/pokemonpy/img/pokedex.jpg"  
+    background_image = Image.open(background_image_path)
+    background_image = background_image.resize((810, 600), Image.LANCZOS)
+    background_photo = ImageTk.PhotoImage(background_image)
+    
+    background_label = tk.Label(root, image=background_photo)
+    background_label.image = background_photo 
+    background_label.place(x=0, y=0, relwidth=1, relheight=1)
+
+    return root
+
+def display_images(screen_frame, image_id):
+    normal_sprite_frame = tk.Frame(screen_frame, bg="#b7eaff", bd=0)  
+    normal_sprite_frame.place(relx=0.66, rely=0.5, anchor="center")  
+    
+    shiny_sprite_frame = tk.Frame(screen_frame, bg="#b7eaff", bd=0)  
+    shiny_sprite_frame.place(relx=0.87, rely=0.81, anchor="center") 
+    
+
+    image_url = f"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/{image_id}.png"
+    shiny_image_url = f"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/shiny/{image_id}.png"
+    
+    normal_image = load_image_from_url(image_url, size=(200, 200))
+    if normal_image:
+        normal_image_label = tk.Label(normal_sprite_frame, image=normal_image, bg="#b7eaff")  
+        normal_image_label.image = normal_image 
+        normal_image_label.pack(padx=10) 
+    else:
+        normal_image_label = tk.Label(normal_sprite_frame, text="Normal Sprite not available", bg="#b7eaff", fg="black")
+        normal_image_label.pack(padx=10)
+
+    shiny_image = load_image_from_url(shiny_image_url, size=(100, 100))
+    if shiny_image:
+        shiny_image_label = tk.Label(shiny_sprite_frame, image=shiny_image, bg="#b7eaff")  
+        shiny_image_label.image = shiny_image 
+        shiny_image_label.pack(padx=10)  
+    else:
+        shiny_image_label = tk.Label(shiny_sprite_frame, text="Shiny Sprite not available", bg="#b7eaff", fg="black")
+        shiny_image_label.pack(padx=10)
+
+    screen_frame.image_refs = [normal_image, shiny_image]
+
+def update_info_box(root, pokemon_data):
+    for widget in root.winfo_children():
+        if isinstance(widget, tk.Label) and widget != root.children['!label']:
+            widget.destroy()
+
+    name_label = tk.Label(root, text=f"ID: {pokemon_data['id']} - {pokemon_data['name'].title()}", bg="#95e2fe", fg="black", font=("Courier", 24, "bold"))
+    name_label.place(relx=0.2, rely=0.14, anchor="center")
+
+
+    height_label = tk.Label(root, text=f"Height: {pokemon_data['height']} m", bg="#95e2fe", fg="black", font=("Courier", 16))
+    height_label.place(relx=0.15, rely=0.4, anchor="center")
+
+    weight_label = tk.Label(root, text=f"Weight: {pokemon_data['weight']} kg", bg="#95e2fe", fg="black", font=("Courier", 16))
+    weight_label.place(relx=0.15, rely=0.45, anchor="center")
+
+
+    types = pokemon_data['types']
+    type_images = []  
+
+    type_x_position = 0.6  
+
+    for t in types:
+        type_name = t['type']['name']
+        image_path = f"D:/pokemonpy/img/types/{type_name}.png"  
+        type_image = load_local_image(image_path, size=(70, 50))  
+        if type_image:
+            type_label = tk.Label(root, image=type_image, bg="#95e2fe")
+            type_label.image = type_image  
+            type_label.place(relx=type_x_position, rely=0.08, anchor="center")
+            type_x_position += 0.1  
+
+
+    stats = {
+        "Attack": pokemon_data['stats'][1]['base_stat'],
+        "Defense": pokemon_data['stats'][2]['base_stat'],
+        "Special Attack": pokemon_data['stats'][3]['base_stat'],
+        "Special Defense": pokemon_data['stats'][4]['base_stat'],
+        "Speed": pokemon_data['stats'][5]['base_stat']
+    }
+
+
+    stat_y_position = 0.5
+    for stat_name, stat_value in stats.items():
+        stat_label = tk.Label(root, text=f"{stat_name}: {stat_value}", bg="#95e2fe", fg="black", font=("Courier", 12))
+        stat_label.place(relx=0.15, rely=stat_y_position, anchor="center")
+        stat_y_position += 0.05 
+
+
+    moves_button = tk.Button(root, text="View Moves", command=lambda: on_moves_button(root, pokemon_data), font=("Courier", 10), bg="#95e2fe")
+    moves_button.place(relx=0.081, rely=0.9, anchor="center")  
+
+def fetch_pokemon_data(pokemon_id):
+    url = f"https://pokeapi.co/api/v2/pokemon/{pokemon_id}/"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        pokemon_data = response.json()
+        
+        return {
+            'name': pokemon_data['name'],
+            'height': pokemon_data['height'],
+            'weight': pokemon_data['weight'],
+            'types': pokemon_data['types'],
+            'stats': pokemon_data['stats'],
+            'id': pokemon_id,
+            'moves': pokemon_data.get('moves', [])
+        }
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data for Pokémon ID {pokemon_id}: {e}")
+        return None
+
+def on_next_button(root):
+    global current_pokemon_id
+    current_pokemon_id += 1 
+    pokemon_data = fetch_pokemon_data(current_pokemon_id)
+    if pokemon_data:
+        display_images(root, current_pokemon_id)
+        update_info_box(root, pokemon_data)
+
+def on_previous_button(root):
+    global current_pokemon_id
+    if current_pokemon_id > 1:
+        current_pokemon_id -= 1 
+        pokemon_data = fetch_pokemon_data(current_pokemon_id)
+        if pokemon_data:
+            display_images(root, current_pokemon_id)
+            update_info_box(root, pokemon_data)
+
+def create_navigation_buttons(root):
+
+    next_button = tk.Button(root, text="Next", command=lambda: on_next_button(root), font=("Courier", 16), bg="#95e2fe")
+    next_button.place(relx=0.65, rely=0.95, anchor="center")
+    
+    prev_button = tk.Button(root, text="Previous", command=lambda: on_previous_button(root), font=("Courier", 16), bg="#95e2fe")
+    prev_button.place(relx=0.5, rely=0.95, anchor="center")
+
+def show_moves_window(pokemon_data):
+    moves_window = Toplevel()
+    moves_window.title(f"{pokemon_data['name'].title()}'s Moves")
+    moves_window.geometry("600x400")
+
+
+    moves_listbox = tk.Listbox(moves_window, font=("Courier", 12), width=50, height=15)
+    moves_listbox.pack(pady=20)
+
+    moves = pokemon_data.get('moves', [])
+    if moves:
+        for move in moves:
+            move_name = move['move']['name']
+            move_url = move['move']['url']
+            move_data = fetch_move_data(move_url)
+            
+            if move_data:
+                move_type = move_data['type']['name']
+                move_info = f"{move_name.title()} - Type: {move_type}"
+                moves_listbox.insert(tk.END, move_info)
+    else:
+        moves_listbox.insert(tk.END, "No moves available for this Pokémon.")
+
+def fetch_move_data(move_url):
+    try:
+        response = requests.get(move_url)
+        response.raise_for_status()
+        move_data = response.json()
+        return move_data
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data for move: {e}")
+        return None
+
+def show_loading_screen(window):
+    loading_label = tk.Label(window, text="Loading...", font=("Courier", 20, "bold"), fg="black", bg="#f0f0f0")
+    loading_label.pack(pady=100) 
+    return loading_label
+
+def hide_loading_screen(loading_label):
+    loading_label.destroy()
+
+#Move data aus API
+def fetch_move_data(url):
+
+    import requests
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching move data: {e}")
+        return None
+    
+#Moves Fenster
+def on_moves_button(root, pokemon_data):
+
+
+    moves_window = Toplevel()
+    moves_window.title(f"{pokemon_data['name'].title()}'s Moves")
+    moves_window.geometry("600x400")
+
+
+    loading_label = show_loading_screen(moves_window)
+
+    # Lädt und zeigt moves
+    def load_moves():
+        moves_listbox = tk.Listbox(moves_window, font=("Courier", 12), width=50, height=15)
+        moves_listbox.pack(pady=20)
+
+        moves = pokemon_data.get('moves', [])
+        if moves:
+            for move in moves:
+                move_name = move['move']['name']
+                move_url = move['move']['url']
+                move_data = fetch_move_data(move_url)
+                
+                if move_data:
+                    move_type = move_data['type']['name']
+                    move_info = f"{move_name.title()} - Type: {move_type}"
+                    moves_listbox.insert(tk.END, move_info)
+        else:
+            moves_listbox.insert(tk.END, "No moves available for this Pokémon.")
+
+        hide_loading_screen(loading_label)
+
+    threading.Thread(target=load_moves, daemon=True).start()
+
+#Ladescreen ende
+def hide_loading_screen(loading_label):
+    loading_label.destroy()
+
+#Such Funktion
+def on_search_button(root, search_entry):
+
+    global current_pokemon_id
+    pokemon_name = search_entry.get().lower()
+    if pokemon_name:
+        url = f"https://pokeapi.co/api/v2/pokemon/{pokemon_name}/"
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            pokemon_data = response.json()
+            current_pokemon_id = pokemon_data['id']
+            display_images(root, current_pokemon_id)
+            update_info_box(root, pokemon_data)
+        except requests.exceptions.RequestException:
+            messagebox.showerror("Error", "Pokemon not found.")
+    else:
+        messagebox.showwarning("Input Error", "Please enter a Pokemon name.")
+
+#Suchfeld
+def create_search_bar(root):
+    search_entry = tk.Entry(root, font=("Courier", 12), bg="#d3e5f0")
+    search_entry.place(relx=0.3, rely=0.87, anchor="center")
+    
+    search_button = tk.Button(root, text="Search", command=lambda: on_search_button(root, search_entry), font=("Courier", 16), bg="#95e2fe")
+    search_button.place(relx=0.30, rely=0.95, anchor="center")
+
+
+def main():
+
+    # Fenster Starten
+    root = create_main_window()
+
+    # Suchlesiste
+    create_search_bar(root)
+
+
+    # Standart Display Pokemon
+    pokemon_data = fetch_pokemon_data(current_pokemon_id)
+    if pokemon_data:
+        display_images(root, current_pokemon_id)
+        update_info_box(root, pokemon_data)
+
+
+    # Navigierungs Buttons
+    create_navigation_buttons(root)
+
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
